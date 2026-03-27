@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  body {
+    font-family: Calibri, Arial, sans-serif;
+    font-size: 15px;
+    background: #fff;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    margin: 0;
+    padding: 40px 20px;
+  }
+
+  .page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 30px;
+  }
+
+  .container { width: 640px; }
+
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+
+  .row label {
+    color: #222;
+    font-size: 30px;
+  }
+
+  .row input {
+    width: 260px;
+    padding: 12px 20px;
+    background: #7ab0d8;
+    border: none;
+    border-radius: 6px;
+    font-size: 28px;
+    color: #fff;
+    outline: none;
+  }
+
+  .row input[readonly] {
+    background: #888;
+    cursor: default;
+  }
+
+  .spacer { height: 20px; }
+
+  .diagram-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .diagram-title {
+    font-size: 13px;
+    color: #555;
+    margin-bottom: 8px;
+    font-style: italic;
+  }
+
+  canvas {
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    background: #f7fafd;
+  }
+
+  .legend {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #444;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .legend-dot {
+    width: 22px;
+    height: 3px;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Form on top -->
+  <div class="container">
+    <div class="row">
+      <label>Runway direction (°):</label>
+      <input type="number" id="runway" min="0" max="360" placeholder="0-360">
+    </div>
+    <div class="row">
+      <label>Wind direction (°):</label>
+      <input type="number" id="windDir" min="0" max="360" placeholder="0-360">
+    </div>
+    <div class="row">
+      <label>Wind strength (kt):</label>
+      <input type="number" id="windStr" min="0">
+    </div>
+    <div class="spacer"></div>
+    <div class="row">
+      <label id="hw-label">Headwind component:</label>
+      <input type="text" id="headwind" readonly>
+    </div>
+    <div class="row">
+      <label>Crosswind component:</label>
+      <input type="text" id="crosswind" readonly>
+    </div>
+  </div>
+
+  <!-- Diagram below -->
+  <div class="diagram-wrap">
+    <div class="diagram-title">Wind Component Diagram (Enlarged Area)</div>
+    <canvas id="diagram" width="520" height="520"></canvas>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#2980b9"></div> Wind vector</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#27ae60"></div> Longitudinal component (H/T)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#e74c3c"></div> Crosswind component</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#888"></div> Runway axis</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const canvas = document.getElementById('diagram');
+  const ctx = canvas.getContext('2d');
+  const CX = 260, CY = 260;
+  const SCALE = 7;
+
+  function drawArrow(ctx, fromX, fromY, toX, toY, color, width=2.5) {
+    const dx = toX - fromX, dy = toY - fromY;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    if (len < 2) return;
+    const angle = Math.atan2(dy, dx);
+    const headLen = 14;
+
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(toX, toY);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(toX, toY);
+    ctx.lineTo(toX - headLen * Math.cos(angle - 0.4), toY - headLen * Math.sin(angle - 0.4));
+    ctx.lineTo(toX - headLen * Math.cos(angle + 0.4), toY - headLen * Math.sin(angle + 0.4));
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  function drawDiagram(headwind, crosswind, windStrength, runwayDeg, windDeg) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = '#dde6ee';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= 520; x += 26) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 520); ctx.stroke();
+    }
+    for (let y = 0; y <= 520; y += 26) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(520, y); ctx.stroke();
+    }
+
+    if (isNaN(headwind) || isNaN(crosswind) || isNaN(windStrength)) {
+      ctx.setLineDash([6,4]);
+      ctx.strokeStyle = '#aaa';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(CX, 40); ctx.lineTo(CX, 480); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(40, CY); ctx.lineTo(480, CY); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#bbb';
+      ctx.font = '16px Calibri';
+      ctx.textAlign = 'center';
+      ctx.fillText('Enter values to see enlarged diagram', CX, CY);
+      return;
+    }
+
+    const runwayRad = (runwayDeg - 90) * Math.PI / 180;
+    const axisLen = 220;
+    ctx.setLineDash([7, 4]);
+    ctx.strokeStyle = '#999';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(CX - Math.cos(runwayRad)*axisLen, CY - Math.sin(runwayRad)*axisLen);
+    ctx.lineTo(CX + Math.cos(runwayRad)*axisLen, CY + Math.sin(runwayRad)*axisLen);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = '#777';
+    ctx.font = 'bold 13px Calibri';
+    ctx.textAlign = 'center';
+    const lx = CX + Math.cos(runwayRad)*235, ly = CY + Math.sin(runwayRad)*235;
+    ctx.fillText('RWY', lx, ly);
+
+    const windRad = (windDeg - 90) * Math.PI / 180;
+    const windPx = windStrength * SCALE;
+    const windEndX = CX - Math.cos(windRad) * windPx;
+    const windEndY = CY - Math.sin(windRad) * windPx;
+    drawArrow(ctx, CX, CY, windEndX, windEndY, '#2980b9', 3.5);
+
+    const headPx = Math.abs(headwind) * SCALE;
+    const headSign = headwind >= 0 ? -1 : 1;
+    const headEndX = CX + headSign * Math.cos(runwayRad) * headPx;
+    const headEndY = CY + headSign * Math.sin(runwayRad) * headPx;
+    drawArrow(ctx, CX, CY, headEndX, headEndY, '#27ae60', 3);
+
+    const crossRad = runwayRad + Math.PI / 2;
+    const crossPx = Math.abs(crosswind) * SCALE;
+    const crossSign = crosswind >= 0 ? -1 : 1;
+    const crossEndX = CX + crossSign * Math.cos(crossRad) * crossPx;
+    const crossEndY = CY + crossSign * Math.sin(crossRad) * crossPx;
+    drawArrow(ctx, CX, CY, crossEndX, crossEndY, '#e74c3c', 3);
+
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(headEndX, headEndY); ctx.lineTo(windEndX, windEndY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(crossEndX, crossEndY); ctx.lineTo(windEndX, windEndY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.font = 'bold 12px Calibri';
+    ctx.fillStyle = '#2980b9';
+    ctx.textAlign = 'left';
+    ctx.fillText(`W: ${windStrength.toFixed(1)} kt`, windEndX + 8, windEndY - 6);
+
+    ctx.fillStyle = '#27ae60';
+    const hwType = headwind >= 0 ? 'H' : 'T';
+    ctx.fillText(`${hwType}: ${Math.abs(headwind).toFixed(1)} kt`, headEndX + 8, headEndY - 6);
+
+    ctx.fillStyle = '#e74c3c';
+    ctx.fillText(`X: ${Math.abs(crosswind).toFixed(1)} kt`, crossEndX + 8, crossEndY + 16);
+
+    ctx.beginPath(); ctx.arc(CX, CY, 5, 0, Math.PI*2); ctx.fillStyle = '#333'; ctx.fill();
+  }
+
+  function calculate() {
+    let runway = parseFloat(document.getElementById('runway').value);
+    let windDir = parseFloat(document.getElementById('windDir').value);
+    const windStr = parseFloat(document.getElementById('windStr').value);
+
+    if (runway > 360) { runway %= 360; document.getElementById('runway').value = runway; }
+    if (windDir > 360) { windDir %= 360; document.getElementById('windDir').value = windDir; }
+
+    if (isNaN(runway) || isNaN(windDir) || isNaN(windStr)) {
+      document.getElementById('headwind').value = '';
+      document.getElementById('crosswind').value = '';
+      drawDiagram(NaN, NaN, NaN, 0, 0);
+      return;
+    }
+
+    const angle = (windDir - runway) * Math.PI / 180;
+    const headwind = windStr * Math.cos(angle);
+    const crosswind = windStr * Math.sin(angle);
+
+    const hwLabel = document.getElementById('hw-label');
+    hwLabel.innerText = headwind >= 0 ? "Headwind component:" : "Tailwind component:";
+
+    document.getElementById('headwind').value = Math.abs(headwind).toFixed(1) + ' kt';
+    document.getElementById('crosswind').value = Math.abs(crosswind).toFixed(1) + ' kt';
+
+    drawDiagram(headwind, crosswind, windStr, runway, windDir);
+  }
+
+  drawDiagram(NaN, NaN, NaN, 0, 0);
+
+  ['runway','windDir','windStr'].forEach(id =>
+    document.getElementById(id).addEventListener('input', calculate)
+  );
+</script>
+</body>
+</html>
